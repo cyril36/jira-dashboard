@@ -43,6 +43,7 @@ function saveConfigToFile() {
       piConfig: PI_CONFIG,
       programProject: PROGRAM_PROJECT,
       programServerId: PROGRAM_SERVER_ID,
+      defaultTeamId: DEFAULT_TEAM_ID,
       jqlBookmarks: JQL_BOOKMARKS,
       disabledPiChecks: DISABLED_PI_CHECKS,
     };
@@ -61,6 +62,7 @@ let TEAMS = [];
 let PI_CONFIG = { name: "", startDate: "", endDate: "", sprintCount: 5, sprintDuration: 14, enabled: false };
 let PROGRAM_PROJECT = "";
 let PROGRAM_SERVER_ID = "primary";
+let DEFAULT_TEAM_ID = "";
 let JQL_BOOKMARKS = []; // [{ id, name, jql }]
 let DISABLED_PI_CHECKS = []; // array of check ids to skip in PI compliance
 
@@ -72,6 +74,7 @@ if (fileConfig) {
   if (fileConfig.piConfig) PI_CONFIG = { ...PI_CONFIG, ...fileConfig.piConfig };
   PROGRAM_PROJECT = fileConfig.programProject ?? "";
   PROGRAM_SERVER_ID = fileConfig.programServerId ?? "primary";
+  DEFAULT_TEAM_ID = fileConfig.defaultTeamId ?? "";
   JQL_BOOKMARKS = fileConfig.jqlBookmarks || [];
   DISABLED_PI_CHECKS = fileConfig.disabledPiChecks || [];
 } else {
@@ -1730,6 +1733,7 @@ function configResponse() {
     teams: TEAMS,
     piConfig: PI_CONFIG,
     programBoard: { projectKey: PROGRAM_PROJECT, serverId: PROGRAM_SERVER_ID },
+    defaultTeamId: DEFAULT_TEAM_ID,
     jqlBookmarks: JQL_BOOKMARKS,
     disabledPiChecks: DISABLED_PI_CHECKS,
     configSource,
@@ -1740,12 +1744,19 @@ function configResponse() {
 // Lightweight status check for frontend setup guard
 app.get("/config/status", (req, res) => {
   const primaryServer = JIRA_SERVERS[0];
+  // Resolve default JQL: env var > default team's JQL > empty
+  let resolvedDefaultJql = DEFAULT_JQL;
+  if (!resolvedDefaultJql && DEFAULT_TEAM_ID) {
+    const team = TEAMS.find((t) => t.id === DEFAULT_TEAM_ID);
+    if (team) resolvedDefaultJql = team.jql || (team.projectKey ? `project = ${team.projectKey} ORDER BY status ASC, updated DESC` : "");
+  }
   res.json({
     needsSetup: needsSetup(),
     configSource,
     serverCount: JIRA_SERVERS.length,
     teamCount: TEAMS.length,
-    defaultJql: DEFAULT_JQL,
+    defaultJql: resolvedDefaultJql,
+    defaultTeamId: DEFAULT_TEAM_ID,
     browserUrl: primaryServer ? getBrowserUrl(primaryServer) : "",
   });
 });
@@ -1824,6 +1835,7 @@ app.post("/config", (req, res) => {
       }
     }
   }
+  if (req.body.defaultTeamId !== undefined) DEFAULT_TEAM_ID = req.body.defaultTeamId;
   if (req.body.jqlBookmarks) JQL_BOOKMARKS = req.body.jqlBookmarks;
   if (req.body.disabledPiChecks) DISABLED_PI_CHECKS = req.body.disabledPiChecks;
   // Delete servers by id
@@ -4589,16 +4601,21 @@ const server = app.listen(PORT, async () => {
   await detectEpicFields();
 });
 
-// Graceful shutdown (fixes Ctrl+C not killing on Windows)
+// Graceful shutdown (works on Linux, macOS, Windows, Cygwin/MobaXterm)
+let shuttingDown = false;
 function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
   console.log("\nShutting down...");
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 3000);
 }
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-if (process.platform === "win32") {
-  const rl = await import("readline");
-  const i = rl.createInterface({ input: process.stdin, output: process.stdout });
-  i.on("close", shutdown);
+// Cygwin/MobaXterm/Git Bash: stdin closes when Ctrl+C is pressed
+// Only attach stdin handlers when running interactively (not in Docker/k8s)
+if (process.stdin.isTTY) {
+  process.stdin.resume();
+  process.stdin.on("end", shutdown);
+  process.stdin.on("error", shutdown);
 }

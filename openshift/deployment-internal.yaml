@@ -1,11 +1,13 @@
 # ============================================================
-# AIgileCoach — GKE Manifests (Lite — external Jira)
-# Jira connection configured from Settings UI, no .env needed
+# AIgileCoach — OpenShift Manifests (Internal API — external Jira)
+# The API is NOT exposed via a Route. Instead, the Next.js frontend
+# proxies all API calls to the backend through internal OCP networking.
+# The proxy target is configured at runtime via INTERNAL_API_URL env var.
 #
-# Build & push images:
+# Build & push images (same image for both modes):
 #   docker build -t gruion/all:aigilecoach-api -f api/Dockerfile .
 #   docker build -t gruion/all:aigilecoach-frontend \
-#     --build-arg NEXT_PUBLIC_API_URL=http://aigilecoach-api.example.com \
+#     --build-arg NEXT_PUBLIC_API_URL="" \
 #     ./frontend
 #   docker push gruion/all:aigilecoach-api
 #   docker push gruion/all:aigilecoach-frontend
@@ -36,7 +38,8 @@ spec:
 
 ---
 # ═════════════════════════════════════════════════════════════
-# API Backend
+# API Backend (internal only — no Route)
+# Reachable inside the cluster at: http://aigilecoach-api:3001
 # ═════════════════════════════════════════════════════════════
 
 apiVersion: apps/v1
@@ -95,6 +98,7 @@ spec:
             claimName: dashboard-config
 
 ---
+# ClusterIP Service — internal only, no Route
 apiVersion: v1
 kind: Service
 metadata:
@@ -103,6 +107,7 @@ metadata:
   labels:
     app: api
 spec:
+  type: ClusterIP
   selector:
     app: api
   ports:
@@ -111,7 +116,8 @@ spec:
 
 ---
 # ═════════════════════════════════════════════════════════════
-# Frontend (Next.js)
+# Frontend (Next.js) — proxies API calls to internal backend
+# INTERNAL_API_URL env var is resolved at container startup
 # ═════════════════════════════════════════════════════════════
 
 apiVersion: apps/v1
@@ -137,6 +143,9 @@ spec:
           image: gruion/all:aigilecoach-frontend
           ports:
             - containerPort: 3000
+          env:
+            - name: INTERNAL_API_URL
+              value: "http://aigilecoach-api:3001"
           resources:
             requests:
               cpu: 100m
@@ -174,72 +183,24 @@ spec:
 
 ---
 # ═════════════════════════════════════════════════════════════
-# Gateway + HTTPRoutes (Gateway API)
+# OpenShift Route — frontend only (single entry point)
 # ═════════════════════════════════════════════════════════════
 
-apiVersion: gateway.networking.k8s.io/v1
-kind: Gateway
-metadata:
-  name: aigilecoach-gateway
-  namespace: aigilecoach
-  labels:
-    app.kubernetes.io/part-of: aigilecoach
-spec:
-  gatewayClassName: gke-l7-global-external-managed
-  listeners:
-    - name: http
-      protocol: HTTP
-      port: 80
-      allowedRoutes:
-        namespaces:
-          from: Same
-
----
-# Frontend route (main UI)
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
+apiVersion: route.openshift.io/v1
+kind: Route
 metadata:
   name: aigilecoach
   namespace: aigilecoach
   labels:
     app: frontend
     app.kubernetes.io/part-of: aigilecoach
+  annotations:
+    haproxy.router.openshift.io/timeout: 120s
 spec:
-  parentRefs:
-    - name: aigilecoach-gateway
-      namespace: aigilecoach
-  hostnames:
-    - "aigilecoach.example.com"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: aigilecoach-frontend
-          port: 3000
-
----
-# API route (browser needs direct access for fetch calls)
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: aigilecoach-api
-  namespace: aigilecoach
-  labels:
-    app: api
-    app.kubernetes.io/part-of: aigilecoach
-spec:
-  parentRefs:
-    - name: aigilecoach-gateway
-      namespace: aigilecoach
-  hostnames:
-    - "aigilecoach-api.example.com"
-  rules:
-    - matches:
-        - path:
-            type: PathPrefix
-            value: /
-      backendRefs:
-        - name: aigilecoach-api
-          port: 3001
+  host: aigilecoach.example.com
+  port:
+    targetPort: 3000
+  to:
+    kind: Service
+    name: aigilecoach-frontend
+    weight: 100

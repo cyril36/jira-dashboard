@@ -1,11 +1,13 @@
 # ============================================================
 # AIgileCoach — GKE Manifests (Full — with Jira server)
 #
-# Build images:
-#   docker build -t aigilecoach-api -f api/Dockerfile .
-#   docker build -t aigilecoach-frontend \
+# Build & push images:
+#   docker build -t gruion/all:aigilecoach-api -f api/Dockerfile .
+#   docker build -t gruion/all:aigilecoach-frontend \
 #     --build-arg NEXT_PUBLIC_API_URL=http://aigilecoach-api.example.com \
 #     ./frontend
+#   docker push gruion/all:aigilecoach-api
+#   docker push gruion/all:aigilecoach-frontend
 # ============================================================
 
 # ─── Namespace ───────────────────────────────────────────────
@@ -270,7 +272,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: aigilecoach-api:latest
+          image: gruion/all:aigilecoach-api
           ports:
             - containerPort: 3001
           env:
@@ -345,7 +347,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: aigilecoach-frontend:latest
+          image: gruion/all:aigilecoach-frontend
           ports:
             - containerPort: 3000
           resources:

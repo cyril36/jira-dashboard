@@ -1,4 +1,4 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3011";
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3011";
 
 // Helper: read error detail from API JSON response body
 async function throwApiError(res, fallback) {

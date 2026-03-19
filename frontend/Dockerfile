@@ -20,5 +20,9 @@ ENV NODE_ENV=production
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# Entrypoint replaces API proxy placeholder with INTERNAL_API_URL env var at startup
+COPY --from=builder /app/entrypoint.sh ./entrypoint.sh
+RUN chmod +x entrypoint.sh
+
 EXPOSE 3000
-CMD ["node", "server.js"]
+CMD ["./entrypoint.sh"]

@@ -68,6 +68,7 @@ export default function SettingsPage() {
   const [teams, setTeams] = useState([]);
   const [servers, setServers] = useState([]);
   const [configSource, setConfigSource] = useState("");
+  const [defaultTeamId, setDefaultTeamId] = useState("");
   const [programBoard, setProgramBoard] = useState({ projectKey: "", serverId: "primary" });
   const [disabledPiChecks, setDisabledPiChecks] = useState([]);
   const [allPiChecks, setAllPiChecks] = useState([]);
@@ -85,6 +86,7 @@ export default function SettingsPage() {
         if (cfg.teams) setTeams(cfg.teams);
         if (cfg.servers) setServers(cfg.servers.map((s, i) => ({ ...s, _key: `srv-${i}-${Date.now()}` })));
         if (cfg.configSource) setConfigSource(cfg.configSource);
+        if (cfg.defaultTeamId !== undefined) setDefaultTeamId(cfg.defaultTeamId);
         if (cfg.programBoard) setProgramBoard(cfg.programBoard);
         if (cfg.disabledPiChecks) setDisabledPiChecks(cfg.disabledPiChecks);
         if (piCompliance?.allCheckIds) setAllPiChecks(piCompliance.allCheckIds);
@@ -112,7 +114,7 @@ export default function SettingsPage() {
       }));
       const [result, cfgResult] = await Promise.all([
         updateSettings({ epicChildrenJqlTemplate: template, missingInfoCriteria, promptSettings }),
-        updateConfig({ teams, piConfig, servers: serverPayloads, programBoard, disabledPiChecks }),
+        updateConfig({ teams, piConfig, servers: serverPayloads, programBoard, defaultTeamId, disabledPiChecks }),
       ]);
       setSettings((prev) => ({ ...prev, ...result }));
       if (cfgResult.servers) setServers(cfgResult.servers);
@@ -727,6 +729,24 @@ export default function SettingsPage() {
                     <p className="text-xs text-gray-400 text-center py-3">No teams configured. Add a team to use PI Planning.</p>
                   )}
                 </div>
+              </div>
+
+              {/* Default Team */}
+              <div className="mb-4">
+                <label className="text-xs font-medium text-gray-600 block mb-1">Default Team</label>
+                <p className="text-[10px] text-gray-400 mb-1.5">When set, pages auto-load this team's issues if no JQL is entered.</p>
+                <select
+                  value={defaultTeamId}
+                  onChange={(e) => setDefaultTeamId(e.target.value)}
+                  className="w-full text-sm bg-white border border-gray-200 rounded px-2 py-1.5"
+                >
+                  <option value="">None (manual JQL only)</option>
+                  {teams.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name || t.projectKey || t.id}{t.projectKey ? ` (${t.projectKey})` : ""}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
