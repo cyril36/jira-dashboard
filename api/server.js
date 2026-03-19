@@ -19,8 +19,6 @@ const JIRA_BASE_URL = process.env.JIRA_BASE_URL || "http://localhost:9080";
 const JIRA_USERNAME = process.env.JIRA_USERNAME || "admin";
 const JIRA_API_TOKEN = process.env.JIRA_API_TOKEN || "";
 const JIRA_PROJECT_KEY = process.env.JIRA_PROJECT_KEY || "TEAM";
-const HASURA_GRAPHQL_URL = process.env.HASURA_GRAPHQL_URL || "http://localhost:9081/v1/graphql";
-const HASURA_ADMIN_SECRET = process.env.HASURA_ADMIN_SECRET || "";
 const DEFAULT_JQL = process.env.JIRA_DEFAULT_JQL || `project = ${JIRA_PROJECT_KEY} ORDER BY status ASC, updated DESC`;
 
 // ─── Persistent Config (file → env vars → defaults) ──────────
@@ -342,20 +340,6 @@ function computeUrgency(issue) {
   }
 
   return flags;
-}
-
-async function hasuraQuery(query, variables = {}) {
-  const res = await fetch(HASURA_GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-hasura-admin-secret": HASURA_ADMIN_SECRET,
-    },
-    body: JSON.stringify({ query, variables }),
-  });
-  const json = await res.json();
-  if (json.errors) throw new Error(json.errors[0].message);
-  return json.data;
 }
 
 // Build JQL to find children of an epic, compatible with all Jira versions
@@ -1361,56 +1345,6 @@ app.post("/ai/summarize-board", async (req, res) => {
     res.json({ jql: jql || "unknown", total_issues: tickets.length, prompt });
   } catch (err) {
     console.error("Error building board prompt:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// ─── Insights endpoints (called by frontend) ────────────
-
-app.get("/insights/summaries", async (req, res) => {
-  try {
-    const data = await hasuraQuery(`
-      query {
-        ai_summaries(order_by: { generated_at: desc }) {
-          issue_key
-          jira_updated_at
-          tldr
-          status_insight
-          action_needed
-          risk_level
-          risk_reason
-          staleness_days
-          generated_at
-        }
-      }
-    `);
-    res.json(data.ai_summaries || []);
-  } catch (err) {
-    console.error("Error fetching summaries:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/insights/board-summary", async (req, res) => {
-  try {
-    const data = await hasuraQuery(`
-      query {
-        ai_board_summaries(order_by: { generated_at: desc }, limit: 1) {
-          jql_hash
-          jql
-          executive_summary
-          blocked_tickets
-          stale_tickets
-          team_workload
-          recommendations
-          total_issues
-          generated_at
-        }
-      }
-    `);
-    res.json(data.ai_board_summaries?.[0] || null);
-  } catch (err) {
-    console.error("Error fetching board summary:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

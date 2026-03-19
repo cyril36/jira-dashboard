@@ -1,0 +1,456 @@
+# ============================================================
+# AIgileCoach — OpenShift Manifests (Full — with Jira server)
+# Route: http://AIgileCoach.hpr.dev.intranet.groupebpce.net
+# ============================================================
+
+# ─── Namespace ───────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aigilecoach
+  labels:
+    app.kubernetes.io/part-of: aigilecoach
+
+---
+# ─── Secrets ─────────────────────────────────────────────────
+apiVersion: v1
+kind: Secret
+metadata:
+  name: aigilecoach-secrets
+  namespace: aigilecoach
+  labels:
+    app.kubernetes.io/part-of: aigilecoach
+type: Opaque
+stringData:
+  JIRA_DB_PASSWORD: "changeme"
+  JIRA_EMAIL: ""
+  JIRA_API_TOKEN: ""
+
+---
+# ─── ConfigMap ───────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aigilecoach-config
+  namespace: aigilecoach
+  labels:
+    app.kubernetes.io/part-of: aigilecoach
+data:
+  JIRA_BASE_URL: "http://jira:8080"
+  JIRA_BROWSER_URL: "http://AIgileCoach.hpr.dev.intranet.groupebpce.net"
+  JIRA_PROJECT_KEY: "TEAM"
+  API_PORT: "3001"
+  AI_PROVIDER: "mock"
+  CONFIG_DIR: "/data"
+  NEXT_PUBLIC_API_URL: "http://aigilecoach-api:3001"
+
+---
+# ═════════════════════════════════════════════════════════════
+# PersistentVolumeClaims
+# ═════════════════════════════════════════════════════════════
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jira-data
+  namespace: aigilecoach
+  labels:
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: jira-db-data
+  namespace: aigilecoach
+  labels:
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: dashboard-config
+  namespace: aigilecoach
+  labels:
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# ═════════════════════════════════════════════════════════════
+# Jira Database
+# ═════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-db
+  namespace: aigilecoach
+  labels:
+    app: jira-db
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jira-db
+  template:
+    metadata:
+      labels:
+        app: jira-db
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "jira"
+            - name: POSTGRES_USER
+              value: "jira"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aigilecoach-secrets
+                  key: JIRA_DB_PASSWORD
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "jira"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "jira"]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jira-db-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira-db
+  namespace: aigilecoach
+  labels:
+    app: jira-db
+spec:
+  selector:
+    app: jira-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+
+---
+# ═════════════════════════════════════════════════════════════
+# Jira Server
+# ═════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira
+  namespace: aigilecoach
+  labels:
+    app: jira
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: jira
+  template:
+    metadata:
+      labels:
+        app: jira
+    spec:
+      containers:
+        - name: jira
+          image: atlassian/jira-software:9.12-jdk17
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ATL_JDBC_URL
+              value: "jdbc:postgresql://jira-db:5432/jira"
+            - name: ATL_JDBC_USER
+              value: "jira"
+            - name: ATL_JDBC_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: aigilecoach-secrets
+                  key: JIRA_DB_PASSWORD
+            - name: ATL_DB_DRIVER
+              value: "org.postgresql.Driver"
+            - name: ATL_DB_TYPE
+              value: "postgres72"
+            - name: JVM_MINIMUM_MEMORY
+              value: "1024m"
+            - name: JVM_MAXIMUM_MEMORY
+              value: "2048m"
+          volumeMounts:
+            - name: data
+              mountPath: /var/atlassian/application-data/jira
+          resources:
+            requests:
+              cpu: 500m
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 3Gi
+          readinessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 120
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /status
+              port: 8080
+            initialDelaySeconds: 180
+            periodSeconds: 30
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: jira-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: jira
+  namespace: aigilecoach
+  labels:
+    app: jira
+spec:
+  selector:
+    app: jira
+  ports:
+    - port: 8080
+      targetPort: 8080
+
+---
+# ═════════════════════════════════════════════════════════════
+# API Backend
+# ═════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: aigilecoach
+  labels:
+    app: api
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: api
+  template:
+    metadata:
+      labels:
+        app: api
+    spec:
+      containers:
+        - name: api
+          image: aigilecoach-api:latest
+          ports:
+            - containerPort: 3001
+          env:
+            - name: JIRA_BASE_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: aigilecoach-config
+                  key: JIRA_BASE_URL
+            - name: JIRA_BROWSER_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: aigilecoach-config
+                  key: JIRA_BROWSER_URL
+            - name: JIRA_PROJECT_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: aigilecoach-config
+                  key: JIRA_PROJECT_KEY
+            - name: JIRA_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: aigilecoach-secrets
+                  key: JIRA_EMAIL
+            - name: JIRA_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: aigilecoach-secrets
+                  key: JIRA_API_TOKEN
+            - name: API_PORT
+              value: "3001"
+            - name: AI_PROVIDER
+              valueFrom:
+                configMapKeyRef:
+                  name: aigilecoach-config
+                  key: AI_PROVIDER
+            - name: CONFIG_DIR
+              value: "/data"
+          volumeMounts:
+            - name: config
+              mountPath: /data
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          readinessProbe:
+            httpGet:
+              path: /config
+              port: 3001
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /config
+              port: 3001
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: dashboard-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aigilecoach-api
+  namespace: aigilecoach
+  labels:
+    app: api
+spec:
+  selector:
+    app: api
+  ports:
+    - port: 3001
+      targetPort: 3001
+
+---
+# ═════════════════════════════════════════════════════════════
+# Frontend (Next.js)
+# ═════════════════════════════════════════════════════════════
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: aigilecoach
+  labels:
+    app: frontend
+    app.kubernetes.io/part-of: aigilecoach
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: aigilecoach-frontend:latest
+          ports:
+            - containerPort: 3000
+          env:
+            - name: NEXT_PUBLIC_API_URL
+              value: "http://aigilecoach-api:3001"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: aigilecoach-frontend
+  namespace: aigilecoach
+  labels:
+    app: frontend
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
+# ═════════════════════════════════════════════════════════════
+# OpenShift Route — HTTP
+# ═════════════════════════════════════════════════════════════
+
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: aigilecoach
+  namespace: aigilecoach
+  labels:
+    app: frontend
+    app.kubernetes.io/part-of: aigilecoach
+  annotations:
+    haproxy.router.openshift.io/timeout: 60s
+spec:
+  host: AIgileCoach.hpr.dev.intranet.groupebpce.net
+  port:
+    targetPort: 3000
+  to:
+    kind: Service
+    name: aigilecoach-frontend
+    weight: 100

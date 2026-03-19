@@ -41,47 +41,7 @@ services:
       - jira-net
     restart: unless-stopped
 
-  # ─── PostgreSQL for Hasura (AI summaries) ──────────────────
-  hasura-db:
-    image: postgres:15-alpine
-    container_name: jira-dashboard-hasura-db
-    environment:
-      - POSTGRES_DB=dashboard
-      - POSTGRES_USER=dashboard
-      - POSTGRES_PASSWORD=${HASURA_DB_PASSWORD}
-    volumes:
-      - hasura-db-data:/var/lib/postgresql/data
-      - ./hasura/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dashboard"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - jira-net
-    restart: unless-stopped
-
-  # ─── Hasura GraphQL Engine ─────────────────────────────────
-  hasura:
-    image: hasura/graphql-engine:v2.44.0
-    container_name: jira-dashboard-hasura
-    ports:
-      - "9081:8080"
-    environment:
-      HASURA_GRAPHQL_DATABASE_URL: postgres://dashboard:${HASURA_DB_PASSWORD}@hasura-db:5432/dashboard
-      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
-      HASURA_GRAPHQL_DEV_MODE: "true"
-      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_ADMIN_SECRET}
-      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: anonymous
-      HASURA_GRAPHQL_ENABLE_TELEMETRY: "false"
-    depends_on:
-      hasura-db:
-        condition: service_healthy
-    networks:
-      - jira-net
-    restart: unless-stopped
-
-  # ─── Backend API (Jira proxy + AI summary read) ────────────
+  # ─── Backend API (Jira proxy) ─────────────────────────────
   api:
     build:
       context: .
@@ -94,21 +54,17 @@ services:
     environment:
       - JIRA_BASE_URL=http://jira:8080
       - JIRA_BROWSER_URL=${NEXT_PUBLIC_JIRA_BASE_URL:-http://localhost:9080}
-      - HASURA_GRAPHQL_URL=http://hasura:8080/v1/graphql
-      - HASURA_ADMIN_SECRET=${HASURA_ADMIN_SECRET}
       - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY:-TEAM}
       - AI_PROVIDER=${AI_PROVIDER:-mock}
       - API_PORT=3001
       - CONFIG_DIR=/data
     volumes:
       - dashboard-config:/data
-    depends_on:
-      - hasura
     networks:
       - jira-net
     restart: unless-stopped
 
-  # ─── Custom Frontend (Dashboard + Insights) ────────────────
+  # ─── Frontend (Next.js Dashboard) ─────────────────────────
   frontend:
     build:
       context: ./frontend
@@ -118,7 +74,6 @@ services:
       - "${FRONTEND_PORT:-3010}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=http://localhost:${API_PORT:-3011}
-      - NEXT_PUBLIC_HASURA_URL=http://localhost:9081/v1/graphql
     depends_on:
       - api
     networks:
@@ -128,7 +83,6 @@ services:
 volumes:
   jira-data:
   jira-db-data:
-  hasura-db-data:
   dashboard-config:
 
 networks:

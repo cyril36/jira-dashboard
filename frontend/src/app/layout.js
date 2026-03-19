@@ -3,8 +3,8 @@ import Sidebar from "../components/Sidebar";
 import Toaster from "../components/Toaster";
 
 export const metadata = {
-  title: "Jira AI Dashboard",
-  description: "AI-powered Jira task overview",
+  title: "AIgileCoach",
+  description: "AI-powered agile coaching & project compliance dashboard",
 };
 
 export default function RootLayout({ children }) {
